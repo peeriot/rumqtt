@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     protocol::{
-        ConnAck, ConnAckProperties, Disconnect, DisconnectProperties, Packet, PingResp, PubAck,
+        self, ConnAck, ConnAckProperties, Disconnect, DisconnectProperties, Packet, PingResp, PubAck,
         PubAckProperties, PubComp, PubCompProperties, PubRec, PubRecProperties, PubRel,
         PubRelProperties, Publish, PublishProperties, SubAck, SubAckProperties, UnsubAck,
     },
@@ -49,6 +49,8 @@ pub enum Event {
     NewMeter(flume::Sender<Vec<Meter>>),
     /// New alert link
     NewAlert(flume::Sender<Vec<Alert>>),
+    /// New subscription link
+    NewSubscription(flume::Sender<(ConnectionId, Subscription)>),
     /// Connection ready to receive more data
     Ready,
     /// Data for native commitlog
@@ -399,6 +401,13 @@ pub struct ConnectionEvents {
 pub enum Meter {
     Router(usize, RouterMeter),
     Subscription(String, SubscriptionMeter),
+}
+
+#[derive(Debug, Clone)]
+pub enum Subscription {
+    Created,
+    Added(ConnectionId, protocol::Filter),
+    Removed(ConnectionId, Filter),
 }
 
 #[derive(Debug, Clone)]

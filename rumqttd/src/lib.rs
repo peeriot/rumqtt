@@ -34,8 +34,9 @@ pub type Cursor = (u64, u64);
 pub use link::alerts;
 pub use link::local;
 pub use link::meters;
+pub use link::subscriptions;
 
-pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
+pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter, Subscription};
 pub use server::{Broker, Error, Spawner, ThreadSpawner};
 
 use self::router::shared_subs::Strategy;

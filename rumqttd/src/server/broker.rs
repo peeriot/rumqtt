@@ -2,7 +2,7 @@ use crate::link::alerts::{self};
 use crate::link::console::ConsoleLink;
 use crate::link::network::{Network, N};
 use crate::link::remote::{self, mqtt_connect, RemoteLink};
-use crate::link::{bridge, timer};
+use crate::link::{bridge, subscriptions, timer};
 use crate::local::LinkBuilder;
 use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
@@ -158,6 +158,14 @@ impl Broker {
     // Link to get alerts
     pub fn alerts(&self) -> Result<alerts::AlertsLink, alerts::LinkError> {
         let link = alerts::AlertsLink::new(self.router_tx.clone())?;
+        Ok(link)
+    }
+
+    // Link to get subscriptions
+    pub fn subscriptions(
+        &self,
+    ) -> Result<subscriptions::SubscriptionsLink, subscriptions::LinkError> {
+        let link = subscriptions::SubscriptionsLink::new(self.router_tx.clone())?;
         Ok(link)
     }
 
