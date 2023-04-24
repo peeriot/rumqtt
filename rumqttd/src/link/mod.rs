@@ -5,4 +5,5 @@ pub mod local;
 pub mod meters;
 pub mod network;
 pub mod remote;
+pub mod subscriptions;
 pub mod timer;

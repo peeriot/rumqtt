@@ -9,7 +9,7 @@ use crate::router::scheduler::{PauseReason, Tracker};
 use crate::router::Forward;
 use crate::segments::Position;
 use crate::*;
-use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
+use flume::{bounded, Receiver, RecvError, Sender, TryRecvError, TrySendError};
 use slab::Slab;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::Utf8Error;
@@ -26,7 +26,7 @@ use super::logs::{AckLog, DataLog};
 use super::scheduler::{ScheduleReason, Scheduler};
 use super::{
     packetid, Connection, DataRequest, Event, FilterIdx, Meter, Notification, Print, RouterMeter,
-    ShadowRequest, MAX_CHANNEL_CAPACITY, MAX_SCHEDULE_ITERATIONS,
+    ShadowRequest, Subscription, MAX_CHANNEL_CAPACITY, MAX_SCHEDULE_ITERATIONS,
 };
 
 #[derive(Error, Debug)]
@@ -67,6 +67,8 @@ pub struct Router {
     meters: Slab<Sender<Vec<Meter>>>,
     /// List of AlertsLink's senders with their respective subscription Filter
     alerts: Slab<Sender<Vec<Alert>>>,
+    /// List of SubscriptionLink's senders
+    subscriptions: Slab<Sender<(ConnectionId, Subscription)>>,
     /// List of connections
     connections: Slab<Connection>,
     /// Connection map from device id to connection id
@@ -107,6 +109,7 @@ impl Router {
 
         let meters = Slab::with_capacity(10);
         let alerts = Slab::with_capacity(10);
+        let subscriptions = Slab::with_capacity(10);
         let connections = Slab::with_capacity(config.max_connections);
         let ibufs = Slab::with_capacity(config.max_connections);
         let obufs = Slab::with_capacity(config.max_connections);
@@ -124,6 +127,7 @@ impl Router {
             graveyard: Graveyard::new(),
             meters,
             alerts,
+            subscriptions,
             connections,
             connection_map: Default::default(),
             subscription_map: Default::default(),
@@ -238,6 +242,7 @@ impl Router {
             } => self.handle_new_connection(connection, incoming, outgoing),
             Event::NewMeter(tx) => self.handle_new_meter(tx),
             Event::NewAlert(tx) => self.handle_new_alert(tx),
+            Event::NewSubscription(subscription) => self.handle_new_subscription(subscription),
             Event::DeviceData => self.handle_device_payload(id),
             Event::Disconnect(disconnect) => {
                 self.handle_disconnection(id, disconnect.execute_will, None)
@@ -365,6 +370,12 @@ impl Router {
         let _alert_id = self.alerts.insert(tx);
     }
 
+    fn handle_new_subscription(&mut self, tx: Sender<(ConnectionId, Subscription)>) {
+        let id = self.subscriptions.insert(tx);
+        let tx = &self.subscriptions[id];
+        let _ = tx.try_send((id, Subscription::Created));
+    }
+
     fn handle_disconnection(
         &mut self,
         id: ConnectionId,
@@ -432,7 +443,14 @@ impl Router {
         // Remove this connection from subscriptions
         for filter in connection.subscriptions.iter() {
             if let Some(connections) = self.subscription_map.get_mut(filter) {
-                connections.remove(&id);
+                if connections.remove(&id) {
+                    self.subscriptions.retain(|sub_id, sub| {
+                        !matches!(
+                            sub.try_send((sub_id, Subscription::Removed(id, filter.clone()))),
+                            Err(TrySendError::Disconnected(_))
+                        )
+                    });
+                }
             }
         }
 
@@ -616,6 +634,13 @@ impl Router {
                             break;
                         }
 
+                        self.subscriptions.retain(|sub_id, sub| {
+                            !matches!(
+                                sub.try_send((sub_id, Subscription::Added(id, f.clone()))),
+                                Err(TrySendError::Disconnected(_))
+                            )
+                        });
+
                         let filter = &f.path;
                         let qos = f.qos;
 
@@ -654,6 +679,16 @@ impl Router {
                             if !removed {
                                 continue;
                             }
+
+                            self.subscriptions.retain(|sub_id, sub| {
+                                !matches!(
+                                    sub.try_send((
+                                        sub_id,
+                                        Subscription::Removed(id, filter.clone())
+                                    )),
+                                    Err(TrySendError::Disconnected(_))
+                                )
+                            });
 
                             let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                             meter.unregister_subscription(filter);
