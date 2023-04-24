@@ -36,7 +36,7 @@ pub use link::local;
 pub use link::meters;
 
 pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
-pub use server::Broker;
+pub use server::{Broker, Error, Spawner, ThreadSpawner};
 
 use self::router::shared_subs::Strategy;
 

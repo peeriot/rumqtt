@@ -12,6 +12,8 @@ use crate::server::tls::{self, TLSAcceptor};
 use crate::{meters, ConnectionSettings, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::collections::HashMap;
+use std::fmt::Display;
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use tracing::{error, field, info, Instrument};
@@ -58,6 +60,22 @@ pub enum Error {
     Accept(String),
     #[error("Remote error = {0}")]
     Remote(#[from] remote::Error),
+}
+
+pub trait Spawner {
+    fn spawn<S: Display + Send + 'static, F: Future<Output = ()> + Send + 'static>(
+        &mut self,
+        name: S,
+        task: F,
+    ) -> Result<(), Error>;
+
+    fn main<S: Display + Send + 'static, F: Future<Output = ()> + Send + 'static>(
+        &mut self,
+        name: S,
+        task: F,
+    ) -> Result<(), Error> {
+        self.spawn(name, task)
+    }
 }
 
 pub struct Broker {
@@ -153,64 +171,50 @@ impl Broker {
 
     #[tracing::instrument(skip(self))]
     pub fn start(&mut self) -> Result<(), Error> {
-        if let Some(metrics_config) = self.config.metrics.clone() {
-            let timer_thread = thread::Builder::new().name("timer".to_owned());
-            let router_tx = self.router_tx.clone();
-            timer_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
+        self.spawn(ThreadSpawner)
+    }
 
-                runtime.block_on(async move {
-                    timer::start(metrics_config, router_tx).await;
-                });
+    pub fn spawn<S>(&mut self, mut spawner: S) -> Result<(), Error>
+    where
+        S: Spawner,
+    {
+        if let Some(metrics_config) = self.config.metrics.clone() {
+            let router_tx = self.router_tx.clone();
+            spawner.spawn("timer", async move {
+                timer::start(metrics_config, router_tx).await;
             })?;
         }
 
         // Spawn bridge in a separate thread.
         if let Some(bridge_config) = self.config.bridge.clone() {
-            let bridge_thread = thread::Builder::new().name(bridge_config.name.clone());
+            let name = bridge_config.name.clone();
             let router_tx = self.router_tx.clone();
-            bridge_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
-
-                runtime.block_on(async move {
-                    if let Err(e) = bridge::start(bridge_config, router_tx, V4).await {
-                        error!(error=?e, "Bridge Link error");
-                    };
-                });
+            spawner.spawn(name, async move {
+                if let Err(e) = bridge::start(bridge_config, router_tx, V4).await {
+                    error!(error=?e, "Bridge Link error");
+                };
             })?;
         }
 
         // Spawn servers in a separate thread.
         for (_, config) in self.config.v4.clone() {
-            let server_thread = thread::Builder::new().name(config.name.clone());
+            let name = config.name.clone();
             let mut server = Server::new(config, self.router_tx.clone(), V4);
-            server_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
-
-                runtime.block_on(async {
-                    if let Err(e) = server.start(LinkType::Remote).await {
-                        error!(error=?e, "Server error - V4");
-                    }
-                });
+            spawner.spawn(name, async move {
+                if let Err(e) = server.start(LinkType::Remote).await {
+                    error!(error=?e, "Server error - V4");
+                }
             })?;
         }
 
         if let Some(v5_config) = &self.config.v5 {
             for (_, config) in v5_config.clone() {
-                let server_thread = thread::Builder::new().name(config.name.clone());
+                let name = config.name.clone();
                 let mut server = Server::new(config, self.router_tx.clone(), V5);
-                server_thread.spawn(move || {
-                    let mut runtime = tokio::runtime::Builder::new_current_thread();
-                    let runtime = runtime.enable_all().build().unwrap();
-
-                    runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Remote).await {
-                            error!(error=?e, "Server error - V5");
-                        }
-                    });
+                spawner.spawn(name, async move {
+                    if let Err(e) = server.start(LinkType::Remote).await {
+                        error!(error=?e, "Server error - V5");
+                    }
                 })?;
             }
         }
@@ -218,24 +222,18 @@ impl Broker {
         #[cfg(feature = "websocket")]
         if let Some(ws_config) = &self.config.ws {
             for (_, config) in ws_config.clone() {
-                let server_thread = thread::Builder::new().name(config.name.clone());
-                //TODO: Add support for V5 procotol with websockets. Registered in config or on ServerSettings
                 let mut server = Server::new(config, self.router_tx.clone(), V4);
-                server_thread.spawn(move || {
-                    let mut runtime = tokio::runtime::Builder::new_current_thread();
-                    let runtime = runtime.enable_all().build().unwrap();
-
-                    runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Websocket).await {
-                            error!(error=?e, "Server error - WS");
-                        }
-                    });
+                spawner.spawn(name, async move {
+                    if let Err(e) = server.start(LinkType::Websocket).await {
+                        error!(error=?e, "Server error - WS");
+                    }
                 })?;
             }
         }
 
         if let Some(prometheus_setting) = &self.config.prometheus {
-            let timeout = prometheus_setting.interval;
+            let timeout = Duration::from_secs(prometheus_setting.interval);
+
             // If port is specified use it instead of listen.
             // NOTE: This means listen is ignored when `port` is specified.
             // `port` will be removed in future release in favour of `listen`
@@ -249,17 +247,18 @@ impl Broker {
                     )),
                 }
             };
-            let metrics_thread = thread::Builder::new().name("Metrics".to_owned());
-            let meter_link = self.meters().unwrap();
-            metrics_thread.spawn(move || {
-                let builder = PrometheusBuilder::new().with_http_listener(addr);
-                builder.install().unwrap();
 
-                let total_publishes = register_gauge!("metrics.router.total_publishes");
-                let total_connections = register_gauge!("metrics.router.total_connections");
-                let failed_publishes = register_gauge!("metrics.router.failed_publishes");
+            let meter_link = self.meters().unwrap();
+            let builder = PrometheusBuilder::new().with_http_listener(addr);
+            builder.install().unwrap();
+
+            let total_publishes = register_gauge!("metrics.router.total_publishes");
+            let total_connections = register_gauge!("metrics.router.total_connections");
+            let failed_publishes = register_gauge!("metrics.router.failed_publishes");
+
+            spawner.spawn("metrics", async move {
                 loop {
-                    if let Ok(metrics) = meter_link.recv() {
+                    if let Ok(metrics) = meter_link.next().await {
                         for m in metrics {
                             match m {
                                 Meter::Router(_, ref r) => {
@@ -272,7 +271,7 @@ impl Broker {
                         }
                     }
 
-                    std::thread::sleep(Duration::from_secs(timeout));
+                    tokio::time::sleep(timeout).await;
                 }
             })?;
         }
@@ -280,9 +279,44 @@ impl Broker {
         let console_link = ConsoleLink::new(self.config.console.clone(), self.router_tx.clone());
 
         let console_link = Arc::new(console_link);
-        let mut runtime = tokio::runtime::Builder::new_current_thread();
-        let runtime = runtime.enable_all().build().unwrap();
-        runtime.block_on(console::start(console_link));
+
+        spawner.main("console", async move { console::start(console_link).await })?;
+
+        Ok(())
+    }
+}
+
+pub struct ThreadSpawner;
+
+impl Spawner for ThreadSpawner {
+    fn spawn<S: Display, F: Future<Output = ()> + Send + 'static>(
+        &mut self,
+        name: S,
+        task: F,
+    ) -> Result<(), Error> {
+        thread::Builder::new()
+            .name(name.to_string())
+            .spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(task);
+            })?;
+
+        Ok(())
+    }
+
+    fn main<S: Display, F: Future<Output = ()> + Send + 'static>(
+        &mut self,
+        _name: S,
+        task: F,
+    ) -> Result<(), Error> {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(task);
 
         Ok(())
     }
