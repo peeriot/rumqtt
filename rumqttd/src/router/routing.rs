@@ -1085,7 +1085,7 @@ fn append_to_commitlog(
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
         error!("Unexpected: retain field was not unset");
-        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
+        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), id, topic.to_owned());
     }
 
     publish.retain = false;
@@ -1106,7 +1106,7 @@ fn append_to_commitlog(
     let mut o = (0, 0);
     for filter_idx in filter_idxs {
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
-        let publish_data = (publish.clone(), properties.clone());
+        let publish_data = (publish.clone(), id, properties.clone());
         let (offset, filter) = datalog.append(publish_data.into(), notifications);
         debug!(
             pkid,
@@ -1293,7 +1293,7 @@ fn forward_device_data(
     // Fill and notify device data
     let forwards = publishes
         .into_iter()
-        .map(|((mut publish, mut properties), offset)| {
+        .map(|((mut publish, connection_id, mut properties), offset)| {
             publish.qos = protocol::qos(qos).unwrap();
 
             // if there is some topic alias to use, set it in publish properties
@@ -1313,6 +1313,7 @@ fn forward_device_data(
                 size: 0,
                 publish,
                 properties,
+                connection_id,
             }
         });
 

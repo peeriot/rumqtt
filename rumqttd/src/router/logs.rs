@@ -15,20 +15,22 @@ use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::time::Instant;
 
-type PubWithProp = (Publish, Option<PublishProperties>);
+type PubWithProp = (Publish, ConnectionId, Option<PublishProperties>);
 
 #[derive(Clone)]
 pub struct PublishData {
     pub publish: Publish,
     pub properties: Option<PublishProperties>,
+    pub connection_id: ConnectionId,
     pub timestamp: Instant,
 }
 
 impl From<PubWithProp> for PublishData {
-    fn from((publish, properties): PubWithProp) -> Self {
+    fn from((publish, connection_id, properties): PubWithProp) -> Self {
         PublishData {
             publish,
             properties,
+            connection_id,
             timestamp: Instant::now(),
         }
     }
@@ -223,7 +225,7 @@ impl DataLog {
         // no need to include timestamp when returning
         let o = o
             .into_iter()
-            .map(|(pubdata, offset)| ((pubdata.publish, pubdata.properties), offset))
+            .map(|(pubdata, offset)| ((pubdata.publish, pubdata.connection_id, pubdata.properties), offset))
             .collect();
 
         Ok((next, o))
@@ -231,7 +233,7 @@ impl DataLog {
 
     pub fn shadow(&mut self, filter: &str) -> Option<PubWithProp> {
         let data = self.native.get_mut(*self.filter_indexes.get(filter)?)?;
-        data.log.last().map(|p| (p.publish, p.properties))
+        data.log.last().map(|p| (p.publish, p.connection_id, p.properties))
     }
 
     /// This method is called when the subscriber has caught up with the commit log. In which case,
@@ -263,9 +265,10 @@ impl DataLog {
         &mut self,
         publish: Publish,
         publish_properties: Option<PublishProperties>,
+        connection_id: ConnectionId,
         topic: Topic,
     ) {
-        let pub_with_props = (publish, publish_properties);
+        let pub_with_props = (publish, connection_id, publish_properties);
         self.retained_publishes.insert(topic, pub_with_props.into());
     }
 
