@@ -435,7 +435,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                 }
                 LinkType::Remote => task::spawn(
                     remote(config, tenant_id.clone(), router_tx, network, protocol).instrument(
-                        tracing::error_span!(
+                        tracing::trace_span!(
                             "remote_link",
                             ?tenant_id,
                             client_id = field::Empty,
