@@ -118,6 +118,7 @@ pub struct Forward {
     pub size: usize,
     pub publish: Publish,
     pub properties: Option<PublishProperties>,
+    pub connection_id: ConnectionId,
 }
 
 #[derive(Debug, Clone)]

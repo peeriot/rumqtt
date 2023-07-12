@@ -263,6 +263,7 @@ impl Router {
             }
             Event::PrintStatus(metrics) => print_status(self, metrics),
             Event::PublishWill((client_id, _tenant_id)) => self.handle_last_will(
+                id,
                 client_id,
                 #[cfg(feature = "validate-tenant-prefix")]
                 _tenant_id,
@@ -1120,6 +1121,7 @@ impl Router {
 
     pub fn handle_last_will(
         &mut self,
+        id: ConnectionId,
         client_id: String,
         #[cfg(feature = "validate-tenant-prefix")] tenant_id: Option<String>,
     ) {
@@ -1150,6 +1152,7 @@ impl Router {
         });
 
         match append_will_message(
+            id,
             publish,
             properties,
             &mut self.datalog,
@@ -1256,7 +1259,7 @@ fn append_to_commitlog(
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
-        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
+        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), id, topic.to_owned());
     }
 
     // after recording retained message, we also send that message to existing subscribers
@@ -1279,7 +1282,7 @@ fn append_to_commitlog(
     let mut o = (0, 0);
     for filter_idx in filter_idxs {
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
-        let publish_data = (publish.clone(), properties.clone());
+        let publish_data = (publish.clone(), id, properties.clone());
         let (offset, filter) = datalog.append(publish_data.into(), notifications);
         debug!(
             pkid,
@@ -1294,6 +1297,7 @@ fn append_to_commitlog(
 }
 
 fn append_will_message(
+    id: ConnectionId,
     mut publish: Publish,
     properties: Option<PublishProperties>,
     datalog: &mut DataLog,
@@ -1327,7 +1331,7 @@ fn append_will_message(
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
-        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
+        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), id, topic.to_owned());
     }
 
     // after recording retained message, we also send that message to existing subscribers
@@ -1345,7 +1349,7 @@ fn append_will_message(
     let mut o = (0, 0);
     for filter_idx in filter_idxs {
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
-        let publish_data = (publish.clone(), properties.clone());
+        let publish_data = (publish.clone(), id, properties.clone());
         let (offset, filter) = datalog.append(publish_data.into(), notifications);
         debug!(
             pkid,
@@ -1586,7 +1590,7 @@ fn forward_device_data(
     // Fill and notify device data
     let forwards = publishes
         .into_iter()
-        .map(|((mut publish, mut properties), offset)| {
+        .map(|((mut publish, connection_id, mut properties), offset)| {
             publish.qos = protocol::qos(qos).unwrap();
 
             // if there is some topic alias to use, set it in publish properties
@@ -1613,6 +1617,7 @@ fn forward_device_data(
                 size: 0,
                 publish,
                 properties,
+                connection_id,
             }
         });
 
