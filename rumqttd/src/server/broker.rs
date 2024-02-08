@@ -16,7 +16,7 @@ use std::fmt::Display;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
-use tracing::{error, field, info, Instrument};
+use tracing::{error, field, info, warn, Instrument};
 
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::accept_hdr_async;
@@ -451,7 +451,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                         protocol,
                         self.awaiting_will_handler.clone(),
                     )
-                    .instrument(tracing::error_span!(
+                    .instrument(tracing::trace_span!(
                         "remote_link",
                         ?tenant_id,
                         client_id = field::Empty,
@@ -569,7 +569,7 @@ async fn remote<P: Protocol>(
         // No need to send a disconnect message when disconnection
         // originated internally in the router.
         Err(remote::Error::Link(e)) => {
-            error!(error=?e, "router-drop");
+            warn!(error=?e, "router-drop");
             send_disconnect = false;
         }
         // Any other error

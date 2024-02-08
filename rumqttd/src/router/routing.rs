@@ -568,7 +568,7 @@ impl Router {
         for packet in packets.drain(0..) {
             match packet {
                 Packet::Publish(publish, properties) => {
-                    let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
+                    let span = tracing::debug_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
                     let qos = publish.qos;
