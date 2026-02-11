@@ -188,6 +188,8 @@ pub struct DataRequest {
     pub filter_idx: FilterIdx,
     /// Qos of the outgoing data
     pub qos: u8,
+    #[serde(default)]
+    pub(crate) nolocal: bool,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
     pub cursor: (u64, u64),
     /// number of messages read from subscription

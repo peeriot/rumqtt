@@ -969,6 +969,7 @@ impl Router {
                 filter: filter_path.clone(),
                 filter_idx,
                 qos: filter.qos as u8,
+                nolocal: filter.nolocal,
                 cursor,
                 read_count: 0,
                 max_count: 100,
@@ -1230,7 +1231,12 @@ fn append_to_commitlog(
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
-        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
+        datalog.insert_to_retained_publishes(
+            publish.clone(),
+            properties.clone(),
+            Some(connection.client_id.clone()),
+            topic.to_owned(),
+        );
     }
 
     // after recording retained message, we also send that message to existing subscribers
@@ -1253,7 +1259,11 @@ fn append_to_commitlog(
     let mut o = (0, 0);
     for filter_idx in filter_idxs {
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
-        let publish_data = (publish.clone(), properties.clone());
+        let publish_data = (
+            publish.clone(),
+            properties.clone(),
+            Some(connection.client_id.clone()),
+        );
         let (offset, filter) = datalog.append(publish_data.into(), notifications);
         debug!(
             pkid,
@@ -1301,7 +1311,12 @@ fn append_will_message(
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
-        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
+        datalog.insert_to_retained_publishes(
+            publish.clone(),
+            properties.clone(),
+            None,
+            topic.to_owned(),
+        );
     }
 
     // after recording retained message, we also send that message to existing subscribers
@@ -1319,7 +1334,7 @@ fn append_will_message(
     let mut o = (0, 0);
     for filter_idx in filter_idxs {
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
-        let publish_data = (publish.clone(), properties.clone());
+        let publish_data = (publish.clone(), properties.clone(), None);
         let (offset, filter) = datalog.append(publish_data.into(), notifications);
         debug!(
             pkid,
@@ -1466,6 +1481,13 @@ fn forward_device_data(
         // and skip the messages previously read while reading next time.
         // but for now, we just try to read all messages and drop the excess ones
         let mut retained_publishes = datalog.read_retained_messages(&request.filter);
+
+        if request.nolocal {
+            retained_publishes.retain(|(_, _, publisher_id)| {
+                publisher_id.as_deref() != Some(outgoing.client_id.as_str())
+            });
+        }
+
         retained_publishes.truncate(inflight_slots as usize);
 
         publishes.extend(retained_publishes.into_iter().map(|p| (p, None)));
@@ -1489,6 +1511,12 @@ fn forward_device_data(
             .into_iter()
             .map(|(p, offset)| (p, Some(offset))),
     );
+
+    if request.nolocal {
+        publishes.retain(|((_, _, publisher_id), _)| {
+            publisher_id.as_deref() != Some(outgoing.client_id.as_str())
+        });
+    }
 
     let (start, next, caughtup) = match next {
         Position::Next { start, end } => (start, end, false),
@@ -1560,7 +1588,7 @@ fn forward_device_data(
     // Fill and notify device data
     let forwards = publishes
         .into_iter()
-        .map(|((mut publish, mut properties), offset)| {
+        .map(|((mut publish, mut properties, _), offset)| {
             publish.qos = protocol::qos(qos).unwrap();
 
             // if there is some topic alias to use, set it in publish properties

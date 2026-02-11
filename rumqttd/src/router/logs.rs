@@ -15,20 +15,22 @@ use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::time::Instant;
 
-type PubWithProp = (Publish, Option<PublishProperties>);
+type PubWithProp = (Publish, Option<PublishProperties>, Option<String>);
 
 #[derive(Clone)]
 pub struct PublishData {
     pub publish: Publish,
     pub properties: Option<PublishProperties>,
+    pub publisher_id: Option<String>,
     pub timestamp: Instant,
 }
 
 impl From<PubWithProp> for PublishData {
-    fn from((publish, properties): PubWithProp) -> Self {
+    fn from((publish, properties, publisher_id): PubWithProp) -> Self {
         PublishData {
             publish,
             properties,
+            publisher_id,
             timestamp: Instant::now(),
         }
     }
@@ -219,7 +221,12 @@ impl DataLog {
         // no need to include timestamp when returning
         let o = o
             .into_iter()
-            .map(|(pubdata, offset)| ((pubdata.publish, pubdata.properties), offset))
+            .map(|(pubdata, offset)| {
+                (
+                    (pubdata.publish, pubdata.properties, pubdata.publisher_id),
+                    offset,
+                )
+            })
             .collect();
 
         Ok((next, o))
@@ -227,7 +234,9 @@ impl DataLog {
 
     pub fn shadow(&mut self, filter: &str) -> Option<PubWithProp> {
         let data = self.native.get_mut(*self.filter_indexes.get(filter)?)?;
-        data.log.last().map(|p| (p.publish, p.properties))
+        data.log
+            .last()
+            .map(|p| (p.publish, p.properties, p.publisher_id))
     }
 
     /// This method is called when the subscriber has caught up with the commit log. In which case,
@@ -259,9 +268,10 @@ impl DataLog {
         &mut self,
         publish: Publish,
         publish_properties: Option<PublishProperties>,
+        publisher_id: Option<String>,
         topic: Topic,
     ) {
-        let pub_with_props = (publish, publish_properties);
+        let pub_with_props = (publish, publish_properties, publisher_id);
         self.retained_publishes.insert(topic, pub_with_props.into());
     }
 
@@ -303,7 +313,13 @@ impl DataLog {
         self.retained_publishes
             .iter()
             .filter(|(topic, _)| matches(topic, filter))
-            .map(|(_, p)| (p.publish.clone(), p.properties.clone()))
+            .map(|(_, p)| {
+                (
+                    p.publish.clone(),
+                    p.properties.clone(),
+                    p.publisher_id.clone(),
+                )
+            })
             .collect()
     }
 }
