@@ -21,7 +21,7 @@ use tracing_subscriber::{
 pub use link::alerts;
 pub use link::local;
 pub use link::meters;
-pub use router::{Alert, Forward, IncomingMeter, Meter, Notification, OutgoingMeter, Router};
+pub use router::{Alert, Forward, IncomingMeter, Meter, Notification, OutgoingMeter, Router, Event};
 use segments::Storage;
 pub use server::{Broker, LinkType, Server};
 
@@ -50,6 +50,9 @@ pub type AuthHandler = Arc<
         + Send
         + Sync,
 >;
+
+pub type RouterMessage = (ConnectionId, Event);
+pub type RouterTx = flume::Sender<RouterMessage>;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {

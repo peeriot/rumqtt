@@ -140,6 +140,7 @@ impl<'a> LinkBuilder<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct LinkTx {
     pub(crate) connection_id: ConnectionId,
     router_tx: Sender<(ConnectionId, Event)>,
@@ -164,7 +165,7 @@ impl LinkTx {
     }
 
     /// Send raw device data
-    fn push(&mut self, data: Packet) -> Result<usize, LinkError> {
+    pub fn push(&mut self, data: Packet) -> Result<usize, LinkError> {
         let len = {
             let mut buffer = self.recv_buffer.lock();
             buffer.push_back(data);
@@ -191,7 +192,7 @@ impl LinkTx {
         Ok(len)
     }
 
-    fn try_push(&mut self, data: Packet) -> Result<usize, LinkError> {
+    pub fn try_push(&mut self, data: Packet) -> Result<usize, LinkError> {
         let len = {
             let mut buffer = self.recv_buffer.lock();
             buffer.push_back(data);
