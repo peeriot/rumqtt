@@ -2230,7 +2230,7 @@ dependencies = [
  "pretty_env_logger",
  "rustls-native-certs",
  "rustls-pemfile",
- "rustls-webpki 0.102.8",
+ "rustls-webpki 0.103.10",
  "serde",
  "thiserror 2.0.17",
  "tokio",
@@ -2260,7 +2260,7 @@ dependencies = [
  "pretty_env_logger",
  "rand 0.8.5",
  "rustls-pemfile",
- "rustls-webpki 0.102.8",
+ "rustls-webpki 0.103.10",
  "serde",
  "serde_json",
  "slab",
@@ -2354,7 +2354,7 @@ dependencies = [
  "log",
  "once_cell",
  "rustls-pki-types",
- "rustls-webpki 0.103.8",
+ "rustls-webpki 0.103.10",
  "subtle",
  "zeroize",
 ]
@@ -2402,9 +2402,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.8"
+version = "0.103.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ffdfa2f5286e2247234e03f680868ac2815974dc39e00ea15adc445d0aafe52"
+checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
 dependencies = [
  "aws-lc-rs",
  "ring",
